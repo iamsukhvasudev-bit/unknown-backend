@@ -841,6 +841,11 @@
         const since = new Date(parseInt(store.get("unknown_since")) || Date.now());
         [["Account ID", uid.slice(2, 12).toUpperCase()], ["Member since", since.toLocaleDateString()], ["Account type", isPro() ? "PRO ⭐" : "Free"], ["Friends", String(getFriends().length)]]
           .forEach(([k, v]) => { const d = document.createElement("div"); d.className = "info-line"; const a = document.createElement("span"); a.textContent = k; const c = document.createElement("span"); c.textContent = v; d.appendChild(a); d.appendChild(c); b.appendChild(d); });
+        const del = document.createElement("button"); del.className = "close"; del.style.cssText = "margin-top:14px;color:var(--danger);border-color:var(--danger);";
+        del.textContent = "🗑 Delete my data";
+        del.onclick = () => { if (confirm("Delete ALL your data (name, friends, saved chats, settings) from this device? This cannot be undone.")) { try { localStorage.clear(); } catch {} location.reload(); } };
+        b.appendChild(del);
+        noteLine(b, "This permanently deletes your data from this device. You can also request server-side deletion at the email in About.");
       });
       else if (which === "notif") openSheet("Notifications & Sound 🔔", (b) => {
         toggleRow(b, "New message notifications", notif.msg, (v) => { notif.msg = v; saveNotif(); });
@@ -885,8 +890,9 @@
         const mk = (label, fn) => { const btn = document.createElement("button"); btn.className = "close"; btn.style.cssText = "margin:8px 0 0;text-align:left;"; btn.textContent = label; btn.onclick = fn; b.appendChild(btn); };
         mk("📋 Community rules", openRules);
         mk("🔒 Data & privacy", openDataPrivacy);
+        mk("📄 Privacy Policy", () => { const url = (window.UNKNOWN_BACKEND ? window.UNKNOWN_BACKEND.replace(/^wss/, "https") : location.origin) + "/privacy.html"; try { window.open(url, "_blank"); } catch {} });
         const box = document.createElement("div"); box.className = "about-box"; box.style.marginTop = "14px";
-        box.innerHTML = '<div class="app">Un<b>known</b></div><div class="note">🔒 End-to-end encrypted · Talk freely, stay Unknown 🕶️</div>';
+        box.innerHTML = '<div class="app">Un<b>known</b></div><div class="note">🔒 End-to-end encrypted · Talk freely, stay Unknown 🕶️<br>Contact: support@unknown.app</div>';
         b.appendChild(box);
       });
     }
