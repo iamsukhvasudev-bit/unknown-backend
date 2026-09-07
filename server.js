@@ -55,6 +55,11 @@ const registry = new Map();
 // high enough not to block them, while still stopping an extreme single-IP flood.
 const MAX_CONN_PER_IP = 120;
 const ipConn = new Map();          // ip -> connection count
+// Global connection cap — the real DoS protection. Client IP can be spoofed behind a proxy,
+// so we also cap TOTAL concurrent sockets to protect the instance from connection floods.
+// (Raise this when you move to a bigger/paid instance.)
+const MAX_TOTAL_CONN = 350;
+let totalConn = 0;
 const MSG_LIMIT = 25, MSG_WINDOW = 10000; // 25 heavy messages / 10s per socket
 const HEAVY = new Set(["chat", "enc", "photo", "voice", "gif", "rtc", "friendReq", "report", "connectFriend", "wipe"]);
 function rateLimited(ws) {
@@ -208,9 +213,12 @@ wss.on("connection", (ws, req) => {
   ws.isAdmin = false;
   ws._ip = clientIp(req);
 
-  // Per-IP connection cap (basic DoS / spam protection)
-  ipConn.set(ws._ip, (ipConn.get(ws._ip) || 0) + 1);
-  if (ipConn.get(ws._ip) > MAX_CONN_PER_IP) { try { ws.close(); } catch {} return; }
+  // Global connection cap — the real protection against connection floods (IP can be spoofed).
+  if (totalConn >= MAX_TOTAL_CONN) { try { ws.close(); } catch {} return; }
+  totalConn++;
+  // Per-IP connection cap (best-effort — client IP isn't fully trustworthy behind a proxy).
+  const ipCount = (ipConn.get(ws._ip) || 0) + 1; ipConn.set(ws._ip, ipCount);
+  if (ipCount > MAX_CONN_PER_IP) { totalConn--; ipConn.set(ws._ip, ipCount - 1); try { ws.close(); } catch {} return; }
 
   ws.on("message", (raw) => {
     if (raw && raw.length > 1500000) return; // hard cap on any single frame
@@ -403,6 +411,7 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     admins.delete(ws);
+    totalConn = Math.max(0, totalConn - 1);
     ipConn.set(ws._ip, Math.max(0, (ipConn.get(ws._ip) || 1) - 1));
     leavePartner(ws, true);
     if (ws.uid) { lastSeen.set(ws.uid, Date.now()); if (registry.get(ws.uid) === ws) registry.delete(ws.uid); }
