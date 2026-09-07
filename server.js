@@ -216,7 +216,11 @@ wss.on("connection", (ws, req) => {
     if (raw && raw.length > 1500000) return; // hard cap on any single frame
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (HEAVY.has(msg.type) && rateLimited(ws)) return; // throttle spam/flood
+    if (HEAVY.has(msg.type) && rateLimited(ws)) {
+      // sustained flooding (way past the limit) → disconnect the abuser
+      if (ws._msgs.length > MSG_LIMIT * 5) { try { ws.close(); } catch {} }
+      return;
+    }
 
     switch (msg.type) {
       case "find": {
