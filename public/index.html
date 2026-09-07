@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Unknown — Anonymous Chat</title>
   <script src="config.js"></script>
   <style>
@@ -29,7 +29,7 @@
       background: var(--bg); color: var(--text); display: flex; flex-direction: column;
       height: 100dvh; overflow: hidden; transition: background .2s, color .2s;
     }
-    header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    header { display: flex; align-items: center; justify-content: space-between; padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
     header .brand { font-weight: 800; font-size: 19px; letter-spacing: .3px; }
     header .brand span { color: var(--accent); }
     .header-right { display: flex; align-items: center; gap: 10px; }
@@ -222,7 +222,7 @@
     .nav-item .badge { position: absolute; }
 
     /* ===== Clean chat header ===== */
-    .chat-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    .chat-header { display: flex; align-items: center; gap: 12px; padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
     .chat-header .ch-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; overflow: hidden; flex-shrink: 0; }
     .chat-header .ch-avatar img { width: 100%; height: 100%; object-fit: cover; }
     .chat-header .ch-name { flex: 1; font-weight: 700; font-size: 16px; }
@@ -482,6 +482,7 @@
             <li>Filter partners by gender</li>
             <li>Video calls &amp; ghost mode</li>
             <li>Unlimited friends</li>
+            <li>No ads</li>
           </ul>
           <div class="price-pill">from ₹1111/week →</div>
         </div>
@@ -610,7 +611,7 @@
   <div class="modal-bg" id="proModal">
     <div class="modal">
       <h3>Unknown PRO ⭐</h3>
-      <div class="sub">Unlock <b>gender matching</b>, <b>voice/video calls</b>, <b>ghost mode</b> & <b>unlimited friends</b>. Photos, voice messages & 5 friends/day stay free.</div>
+      <div class="sub">Unlock <b>gender matching</b>, <b>voice/video calls</b>, <b>ghost mode</b>, <b>unlimited friends</b> & <b>no ads</b>. Photos, voice messages & 5 friends/day stay free.</div>
       <div class="pack" data-plan="week" data-days="7"><div><div class="amt">Weekly</div><div class="bonus">Billed every week</div></div><div class="price">₹1111</div></div>
       <div class="pack" data-plan="month" data-days="30"><div><div class="amt">Monthly</div><div class="bonus">Billed every month</div></div><div class="price">₹2999</div></div>
       <div class="coming">
@@ -659,10 +660,13 @@
 
     // ===== Subscription (PRO) =====
     function subUntil() { const v = parseInt(store.get("unknown_sub_until")); return isNaN(v) ? 0 : v; }
-    // v1 launch: all premium features are free for everyone. Real Google Play billing
-    // will gate NEW premium features in a later update (existing ones stay free).
-    const V1_ALL_FREE = true;
-    function isPro() { return V1_ALL_FREE || Date.now() < subUntil(); }
+    // ===== Google Play Billing (subscriptions) =====
+    // Create these EXACT subscription IDs in Play Console → Monetize → Subscriptions:
+    var PRO_WEEKLY_ID = "pro_weekly";      // ₹1111 / week
+    var PRO_MONTHLY_ID = "pro_monthly";    // ₹2999 / month
+    var billingProOwned = false;           // true when a Play subscription is active this session
+    // PRO is unlocked by an active Play subscription (real) or a local demo unlock (testing before launch).
+    function isPro() { return billingProOwned || Date.now() < subUntil(); }
     function renderPro() {
       const label = $("proLabel");
       if (isPro()) {
@@ -673,6 +677,7 @@
       }
       if (typeof renderAd === "function") renderAd();
       const vb = $("videoBtn"); if (vb) vb.hidden = !isPro();
+      const pc = $("premiumCard"); if (pc) pc.hidden = isPro();
     }
     renderPro();
     setInterval(renderPro, 60000);
@@ -682,16 +687,55 @@
     $("proBtn").onclick = openPro;
     $("proClose").onclick = () => proModal.classList.remove("active");
     proModal.onclick = (e) => { if (e.target === proModal) proModal.classList.remove("active"); };
+    function demoUnlock(days) {
+      const base = Math.max(Date.now(), subUntil());
+      store.set("unknown_sub_until", base + days * 86400000);
+      renderPro();
+      alert(`✅ PRO activated for ${days} days (Demo).\nReal Google Play billing takes over once the app is live with subscription products.`);
+    }
     document.querySelectorAll("#proModal .pack").forEach((p) => {
-      p.onclick = () => {
+      p.onclick = async () => {
         const days = parseInt(p.dataset.days);
-        const base = Math.max(Date.now(), subUntil());
-        store.set("unknown_sub_until", base + days * 86400000);
-        renderPro();
+        const productId = days <= 7 ? PRO_WEEKLY_ID : PRO_MONTHLY_ID;
         proModal.classList.remove("active");
-        alert(`✅ PRO activated for ${days} days! (Demo) — Real billing via Google Play in the app.`);
+        const started = await buyPro(productId);   // real Google Play purchase
+        if (!started) demoUnlock(days);            // billing not ready yet → demo unlock for testing
       };
     });
+
+    // Google Play Billing engine (native only; every call guarded so it can never break the app)
+    var _billingReady = false;
+    function initBilling() {
+      if (!_isNative()) return;
+      var CdvP = window.CdvPurchase;
+      if (!CdvP || !CdvP.store) return;
+      try {
+        var store2 = CdvP.store;
+        try { store2.verbosity = CdvP.LogLevel.QUIET; } catch (e) {}
+        store2.register([
+          { id: PRO_WEEKLY_ID,  type: CdvP.ProductType.PAID_SUBSCRIPTION, platform: CdvP.Platform.GOOGLE_PLAY },
+          { id: PRO_MONTHLY_ID, type: CdvP.ProductType.PAID_SUBSCRIPTION, platform: CdvP.Platform.GOOGLE_PLAY },
+        ]);
+        store2.when()
+          .approved(function (t) { try { t.verify(); } catch (e) { try { t.finish(); } catch (e2) {} } })
+          .verified(function (r) { try { r.finish(); } catch (e) {} })
+          .finished(function (t) { billingProOwned = true; try { renderPro(); } catch (e) {} });
+        if (store2.error) store2.error(function () {});
+        store2.initialize([CdvP.Platform.GOOGLE_PLAY]).then(function () { _billingReady = true; }).catch(function () {});
+      } catch (e) {}
+    }
+    async function buyPro(productId) {
+      var CdvP = window.CdvPurchase;
+      if (!_isNative() || !CdvP || !CdvP.store) return false;
+      try {
+        var product = CdvP.store.get(productId, CdvP.Platform.GOOGLE_PLAY);
+        var offer = product && product.getOffer && product.getOffer();
+        if (!offer) return false;
+        await offer.order();
+        return true;            // purchase flow started; PRO granted by the finished() handler
+      } catch (e) { return false; }
+    }
+    if (_isNative()) { window.addEventListener("load", function () { setTimeout(function () { initBilling(); }, 2200); }); }
 
     // ===== Fake fluctuating online counts (natural up/down random walk) =====
     let female = 3995, male = 6048;
@@ -968,16 +1012,17 @@
     $("helpInput").addEventListener("keydown", (e) => { if (e.key === "Enter") helpSendMsg(); });
 
     // ===== Google AdMob ads (native only; web has no ads) =====
-    const AD_BANNER_ID = "ca-app-pub-8194327847458892/8652799994";
-    const AD_INTERSTITIAL_ID = "ca-app-pub-8194327847458892/2253349500";
-    const ADS_ENABLED = true;              // v1: ads for everyone (no paid tier yet)
-    const AD_EVERY_N_MATCHES = 5;          // full-screen video ad every 5th stranger match
+    // NOTE: var (not const) so renderAd() can safely read these even if called during early init (no TDZ crash)
+    var AD_BANNER_ID = "ca-app-pub-8194327847458892/8652799994";
+    var AD_INTERSTITIAL_ID = "ca-app-pub-8194327847458892/2253349500";
+    var ADS_ENABLED = true;              // v1: ads for everyone (no paid tier yet)
+    var AD_EVERY_N_MATCHES = 5;          // full-screen video ad every 5th stranger match
     function _admob() { return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob; }
     function _isNative() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
 
-    let _bannerShown = false;
+    var _bannerShown = false, _adsInited = false;
     async function showBannerAd() {
-      const AdMob = _admob(); if (!AdMob || _bannerShown) return;
+      const AdMob = _admob(); if (!AdMob || !_adsInited || _bannerShown) return;
       _bannerShown = true;
       try { await AdMob.showBanner({ adId: AD_BANNER_ID, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 56 }); }
       catch { _bannerShown = false; }
@@ -990,19 +1035,19 @@
     // Banner shows only on Home / Friends / Profile tabs (never in chat or calls)
     function renderAd() {
       const onMain = screens.landing.classList.contains("active") || screens.friends.classList.contains("active") || screens.profile.classList.contains("active");
-      const wantAd = ADS_ENABLED && onMain && (typeof callState === "undefined" || callState === "idle");
-      if (_isNative() && _admob()) { if (wantAd) showBannerAd(); else hideBannerAd(); }
+      const wantAd = ADS_ENABLED && onMain && !isPro() && (typeof callState === "undefined" || callState === "idle");
+      if (_isNative() && _admob() && _adsInited) { if (wantAd) showBannerAd(); else hideBannerAd(); }
       $("adBanner").hidden = true; // native overlay handles the banner; HTML placeholder stays hidden
     }
 
-    let _matchCount = 0, _interstitialReady = false;
+    var _matchCount = 0, _interstitialReady = false;
     async function prepInterstitial() {
       const AdMob = _admob(); if (!AdMob) return;
       try { await AdMob.prepareInterstitial({ adId: AD_INTERSTITIAL_ID }); _interstitialReady = true; }
       catch { _interstitialReady = false; }
     }
     async function onMatchAd() {
-      if (!ADS_ENABLED || !_isNative()) return;
+      if (!ADS_ENABLED || !_isNative() || !_adsInited || isPro()) return;
       const AdMob = _admob(); if (!AdMob) return;
       _matchCount++;
       if (_matchCount % AD_EVERY_N_MATCHES !== 0) return;
@@ -1012,14 +1057,14 @@
       } catch { _interstitialReady = false; }
     }
     // Rewarded video — "watch a video to add an extra friend beyond the daily 5"
-    const AD_REWARDED_ID = "ca-app-pub-8194327847458892/9550948691";
-    let _rewardedReady = false;
+    var AD_REWARDED_ID = "ca-app-pub-8194327847458892/9550948691";
+    var _rewardedReady = false;
     async function prepRewarded() {
       const AdMob = _admob(); if (!AdMob || !AD_REWARDED_ID) return;
       try { await AdMob.prepareRewardVideoAd({ adId: AD_REWARDED_ID }); _rewardedReady = true; }
       catch { _rewardedReady = false; }
     }
-    function rewardedAvailable() { return _isNative() && !!_admob() && !!AD_REWARDED_ID; }
+    function rewardedAvailable() { return _isNative() && _adsInited && !!_admob() && !!AD_REWARDED_ID; }
     async function watchAdForReward() {
       const AdMob = _admob(); if (!rewardedAvailable()) return false;
       try {
@@ -1035,11 +1080,14 @@
       const AdMob = _admob(); if (!AdMob) return;
       try { await AdMob.initialize({ initializeForTesting: false }); } catch {}
       try { const info = await AdMob.requestConsentInfo(); if (info && info.isConsentFormAvailable && info.status === "REQUIRED") await AdMob.showConsentForm(); } catch {}
+      _adsInited = true;
       prepInterstitial();
       prepRewarded();
+      renderAd(); // now safe to show banner if on a main tab
     }
-    initAds();
+    // Never block first paint: initialise ads well after the UI is up
     renderAd();
+    if (_isNative()) { window.addEventListener("load", function(){ setTimeout(function(){ initAds().catch(function(){}); }, 1500); }); }
 
     // ===== Bottom nav wiring + preferences toggle =====
     document.querySelectorAll("#bottomNav .nav-item").forEach((it) => {
