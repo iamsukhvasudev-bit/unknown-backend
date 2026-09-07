@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unknown — Admin</title>
+  <style>
+    :root { --bg:#0b0f0d; --panel:#121815; --panel2:#182019; --border:#223029; --accent:#1fd18a; --text:#e8f2ec; --muted:#8b9a92; --danger:#ff6b6b; --warn:#ffd166; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:16px 20px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+    header .brand { font-weight:800; font-size:20px; }
+    header .brand span { color:var(--accent); }
+    header .live { font-size:12px; color:var(--muted); }
+    .wrap { max-width:1000px; margin:0 auto; padding:20px; }
+    /* Login */
+    #login { max-width:360px; margin:80px auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:28px; text-align:center; }
+    #login h2 { margin:0 0 6px; } #login p { color:var(--muted); font-size:13px; margin:0 0 18px; }
+    #login input { width:100%; padding:13px 15px; border-radius:12px; border:1px solid var(--border); background:var(--panel2); color:var(--text); font-size:15px; outline:none; margin-bottom:12px; }
+    button.primary { background:var(--accent); color:#052; border:none; border-radius:999px; padding:12px 22px; font-weight:800; cursor:pointer; font-size:14px; }
+    #loginErr { color:var(--danger); font-size:13px; min-height:16px; }
+    /* Dashboard */
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin-bottom:20px; }
+    .stat { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; text-align:center; }
+    .stat .n { font-size:28px; font-weight:800; color:var(--accent); }
+    .stat .l { font-size:12px; color:var(--muted); margin-top:4px; }
+    .section { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:20px; }
+    .section h3 { margin:0 0 12px; font-size:16px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--border); }
+    th { color:var(--muted); font-weight:600; }
+    td .mono { font-family:monospace; color:var(--muted); }
+    .tag { font-size:11px; padding:2px 7px; border-radius:999px; font-weight:700; }
+    .tag.f { background:#3a2740; color:#ff9ed8; } .tag.m { background:#1e2f45; color:#8ec5ff; } .tag.on { background:#12351f; color:var(--accent); } .tag.off { background:var(--panel2); color:var(--muted); }
+    .act { display:flex; gap:6px; }
+    .act button { border:none; border-radius:8px; padding:5px 10px; font-size:11px; font-weight:700; cursor:pointer; }
+    .b-block { background:var(--danger); color:#fff; } .b-kick { background:var(--warn); color:#3a2a00; } .b-msg { background:var(--panel2); color:var(--text); border:1px solid var(--border); } .b-unblock { background:var(--accent); color:#052; }
+    .orient-row { display:flex; flex-wrap:wrap; gap:8px; }
+    .orient-chip { background:var(--panel2); border:1px solid var(--border); border-radius:999px; padding:5px 12px; font-size:12px; }
+    textarea { width:100%; min-height:90px; background:var(--panel2); border:1px solid var(--border); color:var(--text); border-radius:12px; padding:12px; font-size:14px; resize:vertical; font-family:inherit; }
+    .muted { color:var(--muted); font-size:12px; }
+    .empty { color:var(--muted); padding:16px; text-align:center; }
+    .note { font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Un<span>known</span> · Admin</div>
+    <div class="live" id="live">Not connected</div>
+  </header>
+
+  <section id="login">
+    <h2>🔐 Admin Login</h2>
+    <p>Enter the admin key to access the moderation dashboard.</p>
+    <input id="keyInput" type="password" placeholder="Admin key" />
+    <div><button class="primary" id="loginBtn">Login</button></div>
+    <div id="loginErr"></div>
+  </section>
+
+  <div class="wrap" id="dash" hidden>
+    <div class="grid" id="statsGrid"></div>
+
+    <div class="section">
+      <h3>🧭 Orientation breakdown</h3>
+      <div class="orient-row" id="orientRow"><span class="muted">—</span></div>
+      <div class="note">🔒 Chat content is end-to-end encrypted and is never shown here — only anonymous metadata for safety.</div>
+    </div>
+
+    <div class="section">
+      <h3>👥 Online users (<span id="userCount">0</span>)</h3>
+      <div style="overflow-x:auto"><table id="usersTable"><thead><tr><th>ID</th><th>Name</th><th>Gender</th><th>Orientation</th><th>Status</th><th>Actions</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+    </div>
+
+    <div class="section">
+      <h3>🚩 Reports</h3>
+      <div style="overflow-x:auto"><table id="reportsTable"><thead><tr><th>ID</th><th>Reports</th><th>Action</th></tr></thead><tbody id="reportsBody"></tbody></table></div>
+      <div class="note">Users with 5+ reports are auto-banned.</div>
+    </div>
+
+    <div class="section">
+      <h3>🔤 Banned words (drug names)</h3>
+      <p class="muted">One word per line. A message is blocked only when a word here appears with a buy/sell intent (e.g. "cocaine buy"). Sexual content is handled via reports, not word-bans. Alcohol & cigarette are intentionally allowed.</p>
+      <textarea id="wordsArea"></textarea>
+      <div style="margin-top:10px"><button class="primary" id="saveWords">Save & push to all users</button> <span id="wordsSaved" class="muted"></span></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let ws = null, authed = false;
+
+    function connect(key) {
+      ws = new WebSocket((location.protocol === "https:" ? "wss" : "ws") + "://" + location.host);
+      ws.onopen = () => { $("live").textContent = "Connecting…"; ws.send(JSON.stringify({ type: "adminAuth", key })); };
+      ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
+      ws.onclose = () => { $("live").textContent = "Disconnected — reload to reconnect"; };
+      ws.onerror = () => {};
+    }
+    function handle(m) {
+      if (m.type === "adminOk") { authed = true; sessionStorage.setItem("adminKey", $("keyInput").value); $("login").hidden = true; $("dash").hidden = false; $("live").textContent = "🟢 Live"; }
+      else if (m.type === "adminFail") { $("loginErr").textContent = "Wrong admin key."; }
+      else if (m.type === "adminData") { render(m); }
+    }
+    function cmd(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
+
+    function render(d) {
+      const s = d.stats || {};
+      const cards = [["Online", s.online || 0], ["♀ Female", s.f || 0], ["♂ Male", s.m || 0], ["Unset", s.unknown || 0], ["Active chats", s.activeChats || 0], ["Searching", s.waiting || 0], ["Banned", s.banned || 0]];
+      $("statsGrid").innerHTML = cards.map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+      const orient = s.orient || {};
+      const ok = Object.keys(orient);
+      $("orientRow").innerHTML = ok.length ? ok.map((k) => `<span class="orient-chip">${k}: <b>${orient[k]}</b></span>`).join("") : '<span class="muted">No data</span>';
+
+      const users = d.users || [];
+      $("userCount").textContent = users.length;
+      $("usersBody").innerHTML = users.length ? users.map((u) => {
+        const g = u.gender === "f" ? '<span class="tag f">♀ F</span>' : u.gender === "m" ? '<span class="tag m">♂ M</span>' : '<span class="tag off">?</span>';
+        const st = u.inChat ? '<span class="tag on">in chat</span>' : '<span class="tag off">idle</span>';
+        const id = u.uid.slice(2, 12).toUpperCase();
+        return `<tr><td class="mono">${id}</td><td>${esc(u.name)}</td><td>${g}</td><td>${esc(u.orientation)}</td><td>${st}${u.hidden ? ' 👻' : ''}</td>
+          <td><div class="act"><button class="b-msg" data-msg="${u.uid}">Msg</button><button class="b-kick" data-kick="${u.uid}">Kick</button><button class="b-block" data-block="${u.uid}">Block</button></div></td></tr>`;
+      }).join("") : '<tr><td colspan="6" class="empty">No users online</td></tr>';
+
+      const reports = d.reports || [];
+      $("reportsBody").innerHTML = reports.length ? reports.map((r) => `<tr><td class="mono">${r.uid.slice(2, 12).toUpperCase()}</td><td>${r.count}</td><td><div class="act"><button class="b-block" data-block="${r.uid}">Block</button><button class="b-unblock" data-unblock="${r.uid}">Unblock</button></div></td></tr>`).join("") : '<tr><td colspan="3" class="empty">No reports</td></tr>';
+
+      if (document.activeElement !== $("wordsArea")) $("wordsArea").value = (d.words || []).join("\n");
+      wireActions();
+    }
+    function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+    function wireActions() {
+      document.querySelectorAll("[data-block]").forEach((b) => b.onclick = () => { if (confirm("Block this user permanently (account + reconnection)?")) cmd({ type: "adminBlock", uid: b.dataset.block }); });
+      document.querySelectorAll("[data-unblock]").forEach((b) => b.onclick = () => cmd({ type: "adminUnblock", uid: b.dataset.unblock }));
+      document.querySelectorAll("[data-kick]").forEach((b) => b.onclick = () => cmd({ type: "adminKick", uid: b.dataset.kick }));
+      document.querySelectorAll("[data-msg]").forEach((b) => b.onclick = () => { const t = prompt("Message to send to this user (as Moderator):"); if (t) cmd({ type: "adminMsg", uid: b.dataset.msg, text: t }); });
+    }
+    $("saveWords").onclick = () => { const words = $("wordsArea").value.split("\n").map((w) => w.trim().toLowerCase()).filter(Boolean); cmd({ type: "adminSetWords", words }); $("wordsSaved").textContent = "Saved ✓"; setTimeout(() => $("wordsSaved").textContent = "", 2000); };
+
+    $("loginBtn").onclick = () => { const k = $("keyInput").value.trim(); if (!k) return; $("loginErr").textContent = ""; connect(k); };
+    $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
+    // convenience: prefill from session
+    const saved = sessionStorage.getItem("adminKey"); if (saved) { $("keyInput").value = saved; connect(saved); }
+  </script>
+</body>
+</html>
