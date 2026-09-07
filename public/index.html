@@ -22,6 +22,7 @@
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     [hidden] { display: none !important; }
+    .badge-paid, .gender-opt .cost { display: none; } /* v1: all features free — no PRO/PAID badges */
     html, body { height: 100%; margin: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -475,7 +476,7 @@
         </div>
         <div class="field"><div class="label">Bio</div><div class="bio-text" id="dispBio">—</div></div>
 
-        <div class="premium-card" id="premiumCard">
+        <div class="premium-card" id="premiumCard" hidden>
           <h3>⭐ Unknown PRO</h3>
           <ul>
             <li>Filter partners by gender</li>
@@ -658,7 +659,10 @@
 
     // ===== Subscription (PRO) =====
     function subUntil() { const v = parseInt(store.get("unknown_sub_until")); return isNaN(v) ? 0 : v; }
-    function isPro() { return Date.now() < subUntil(); }
+    // v1 launch: all premium features are free for everyone. Real Google Play billing
+    // will gate NEW premium features in a later update (existing ones stay free).
+    const V1_ALL_FREE = true;
+    function isPro() { return V1_ALL_FREE || Date.now() < subUntil(); }
     function renderPro() {
       const label = $("proLabel");
       if (isPro()) {
