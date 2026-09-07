@@ -812,7 +812,25 @@
     let privacy = getJSON("unknown_privacy", { call: "friends", photo: "everyone" });
     function saveNotif() { store.set("unknown_notif", JSON.stringify(notif)); }
     function savePriv() { store.set("unknown_privacy", JSON.stringify(privacy)); }
-    function beep() { if (!notif.sound) return; try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(), g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = 660; g.gain.value = 0.05; o.start(); o.stop(ctx.currentTime + 0.12); } catch {} }
+    // ===== Sounds (all generated via WebAudio — no files, 0 MB) =====
+    let _actx = null;
+    function actx() { try { if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)(); if (_actx.state === "suspended") _actx.resume(); return _actx; } catch { return null; } }
+    function tone(freq, at, dur, vol, type) { const c = actx(); if (!c) return; const o = c.createOscillator(), g = c.createGain(); o.type = type || "sine"; o.frequency.value = freq; const t = c.currentTime + at; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + dur + 0.02); }
+    function vibrate(p) { try { if (notif.vibe && navigator.vibrate) navigator.vibrate(p); } catch {} }
+    // Incoming message: pleasant two-note ding
+    function beep() { if (!notif.sound) return; tone(784, 0, 0.14, 0.09, "sine"); tone(1046, 0.09, 0.16, 0.08, "sine"); vibrate(35); }
+    // Message sent: subtle soft tick
+    function tick() { if (!notif.sound) return; tone(880, 0, 0.06, 0.04, "triangle"); }
+    // New friend: happy rising 3-note chime
+    function friendTone() { if (!notif.sound) return; tone(659, 0, 0.16, 0.09, "sine"); tone(880, 0.13, 0.16, 0.09, "sine"); tone(1175, 0.27, 0.26, 0.09, "sine"); vibrate([0, 60, 60, 120]); }
+    // Incoming call: looping classic double-ring until answered/declined
+    let _ringTimer = null;
+    function ring() { stopRing(); if (!notif.sound && !notif.vibe) return; const buzz = () => { if (notif.sound) { tone(660, 0, 0.4, 0.10, "sine"); tone(660, 0.5, 0.4, 0.10, "sine"); } vibrate([0, 400, 200, 400]); }; buzz(); _ringTimer = setInterval(buzz, 2600); }
+    function stopRing() { if (_ringTimer) { clearInterval(_ringTimer); _ringTimer = null; } try { if (navigator.vibrate) navigator.vibrate(0); } catch {} }
+    // Outgoing call: soft ringback tone (caller hears it, no vibration)
+    let _rbTimer = null;
+    function ringback() { stopRingback(); if (!notif.sound) return; const rb = () => tone(440, 0, 0.9, 0.05, "sine"); rb(); _rbTimer = setInterval(rb, 3000); }
+    function stopRingback() { if (_rbTimer) { clearInterval(_rbTimer); _rbTimer = null; } }
 
     // Blocked users
     function getBlocked() { return getJSON("unknown_blocked", []); }
@@ -1341,7 +1359,7 @@
       callVideo = !!video;
       try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: callVideo }); } catch { alert((callVideo ? "Camera & microphone" : "Microphone") + " permission needed for calls."); callVideo = false; return; }
       if (callVideo) localVideo.srcObject = localStream;
-      callState = "outgoing"; callMuted = false; showCall(peer.name); callStatusEl.textContent = callVideo ? "Video calling…" : "Calling…"; setCallActions("outgoing");
+      callState = "outgoing"; callMuted = false; showCall(peer.name); callStatusEl.textContent = callVideo ? "Video calling…" : "Calling…"; setCallActions("outgoing"); ringback();
       newPC(); localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
       const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
       sendRtc({ kind: "offer", sdp: pc.localDescription, video: callVideo });
@@ -1351,8 +1369,10 @@
       if (callState !== "idle") { sendRtc({ kind: "bye" }); return; } // busy
       callVideo = !!video; incomingOffer = sdp; callState = "incoming";
       showCall(peer.name); callStatusEl.textContent = "Incoming " + (callVideo ? "video " : "") + "call…"; setCallActions("incoming");
+      ring();
     }
     async function acceptCall() {
+      stopRing();
       try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: callVideo }); } catch { alert((callVideo ? "Camera & microphone" : "Microphone") + " permission needed."); declineCall(); return; }
       if (callVideo) localVideo.srcObject = localStream;
       newPC(); localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
@@ -1362,11 +1382,11 @@
       callState = "connected"; setCallActions("connected"); callTimerStart();
     }
     function declineCall() { sendRtc({ kind: "bye" }); cleanupCall(); }
-    async function onAnswer(sdp) { if (pc) { await pc.setRemoteDescription(sdp); callState = "connected"; setCallActions("connected"); callTimerStart(); } }
+    async function onAnswer(sdp) { if (pc) { stopRingback(); await pc.setRemoteDescription(sdp); callState = "connected"; setCallActions("connected"); callTimerStart(); } }
     async function onIce(c) { if (pc) { try { await pc.addIceCandidate(c); } catch {} } }
     function toggleMute() { callMuted = !callMuted; if (localStream) localStream.getAudioTracks().forEach((t) => t.enabled = !callMuted); setCallActions(callState); }
     function endCall() { sendRtc({ kind: "bye" }); cleanupCall(); }
-    function cleanupCall() { callTimerStop(); if (pc) { try { pc.close(); } catch {} pc = null; } if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; } remoteVideo.srcObject = null; localVideo.srcObject = null; callState = "idle"; incomingOffer = null; callMuted = false; callVideo = false; callOverlay.classList.remove("video"); callOverlay.hidden = true; }
+    function cleanupCall() { stopRing(); stopRingback(); callTimerStop(); if (pc) { try { pc.close(); } catch {} pc = null; } if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; } remoteVideo.srcObject = null; localVideo.srcObject = null; callState = "idle"; incomingOffer = null; callMuted = false; callVideo = false; callOverlay.classList.remove("video"); callOverlay.hidden = true; }
     function handleRtc(data) {
       if (!data) return;
       if (data.kind === "offer") onOffer(data.sdp, data.video);
@@ -1396,6 +1416,7 @@
       if (!isFriend(fuid)) { addFriendRecord({ uid: fuid, name: fname }); incFriendAdds(); }
       peer = { uid: fuid, name: fname };
       addSys("🎉 You are now friends with " + fname + "! This chat is being saved.");
+      friendTone();
       updateChatMode();
     }
     $("chName").onclick = () => openFriendMenu();
