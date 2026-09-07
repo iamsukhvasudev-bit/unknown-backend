@@ -940,7 +940,7 @@
     const FAQ = [
       { q: "How do I stay anonymous?", a: "We never ask for your number, email or real name. Only a name of your choice and a random device ID are used — nothing personal is stored." },
       { q: "Are my chats private?", a: "Yes. Chats and media are end-to-end encrypted — the server only relays scrambled data it cannot read." },
-      { q: "How do friends & saved chats work?", a: "During a chat tap ➕ Friend. Once both accept, that chat is saved and you can reconnect anytime from the Friends screen. Free users can add 5 friends/day." },
+      { q: "How do friends & saved chats work?", a: "During a chat tap ➕ Friend. Once both accept, that chat is saved and you can reconnect anytime from the Friends screen. Free users can add 5 friends/day — after that, watch a short video to add more, or go PRO for unlimited." },
       { q: "What does PRO include?", a: "Gender matching, ghost mode (appear offline), unlimited friends, and upcoming voice/video calls, movies & games. Weekly ₹1111 or Monthly ₹2999." },
       { q: "How do I report someone?", a: "Tap the ⚑ button in a chat. Users reported by 5+ people are permanently banned by account and IP." },
       { q: "How do I block a friend?", a: "Open Friends, and use Block on a friend. Blocked users appear under Profile → Blocked Users where you can unblock them." }
@@ -967,11 +967,78 @@
     $("helpSend").onclick = helpSendMsg;
     $("helpInput").addEventListener("keydown", (e) => { if (e.key === "Enter") helpSendMsg(); });
 
-    // ===== Ad banner (free users only, on main tabs) =====
+    // ===== Google AdMob ads (native only; web has no ads) =====
+    const AD_BANNER_ID = "ca-app-pub-8194327847458892/8652799994";
+    const AD_INTERSTITIAL_ID = "ca-app-pub-8194327847458892/2253349500";
+    const ADS_ENABLED = true;              // v1: ads for everyone (no paid tier yet)
+    const AD_EVERY_N_MATCHES = 5;          // full-screen video ad every 5th stranger match
+    function _admob() { return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AdMob; }
+    function _isNative() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+
+    let _bannerShown = false;
+    async function showBannerAd() {
+      const AdMob = _admob(); if (!AdMob || _bannerShown) return;
+      _bannerShown = true;
+      try { await AdMob.showBanner({ adId: AD_BANNER_ID, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 56 }); }
+      catch { _bannerShown = false; }
+    }
+    async function hideBannerAd() {
+      const AdMob = _admob(); if (!AdMob || !_bannerShown) return;
+      _bannerShown = false;
+      try { await AdMob.hideBanner(); } catch {}
+    }
+    // Banner shows only on Home / Friends / Profile tabs (never in chat or calls)
     function renderAd() {
       const onMain = screens.landing.classList.contains("active") || screens.friends.classList.contains("active") || screens.profile.classList.contains("active");
-      $("adBanner").hidden = isPro() || !onMain;
+      const wantAd = ADS_ENABLED && onMain && (typeof callState === "undefined" || callState === "idle");
+      if (_isNative() && _admob()) { if (wantAd) showBannerAd(); else hideBannerAd(); }
+      $("adBanner").hidden = true; // native overlay handles the banner; HTML placeholder stays hidden
     }
+
+    let _matchCount = 0, _interstitialReady = false;
+    async function prepInterstitial() {
+      const AdMob = _admob(); if (!AdMob) return;
+      try { await AdMob.prepareInterstitial({ adId: AD_INTERSTITIAL_ID }); _interstitialReady = true; }
+      catch { _interstitialReady = false; }
+    }
+    async function onMatchAd() {
+      if (!ADS_ENABLED || !_isNative()) return;
+      const AdMob = _admob(); if (!AdMob) return;
+      _matchCount++;
+      if (_matchCount % AD_EVERY_N_MATCHES !== 0) return;
+      try {
+        if (!_interstitialReady) await prepInterstitial();
+        if (_interstitialReady) { await AdMob.showInterstitial(); _interstitialReady = false; prepInterstitial(); }
+      } catch { _interstitialReady = false; }
+    }
+    // Rewarded video — "watch a video to add an extra friend beyond the daily 5"
+    const AD_REWARDED_ID = "ca-app-pub-8194327847458892/9550948691";
+    let _rewardedReady = false;
+    async function prepRewarded() {
+      const AdMob = _admob(); if (!AdMob || !AD_REWARDED_ID) return;
+      try { await AdMob.prepareRewardVideoAd({ adId: AD_REWARDED_ID }); _rewardedReady = true; }
+      catch { _rewardedReady = false; }
+    }
+    function rewardedAvailable() { return _isNative() && !!_admob() && !!AD_REWARDED_ID; }
+    async function watchAdForReward() {
+      const AdMob = _admob(); if (!rewardedAvailable()) return false;
+      try {
+        if (!_rewardedReady) await prepRewarded();
+        if (!_rewardedReady) return false;
+        const reward = await AdMob.showRewardVideoAd();
+        _rewardedReady = false; prepRewarded();
+        return !!reward;
+      } catch { _rewardedReady = false; return false; }
+    }
+    async function initAds() {
+      if (!_isNative()) return;
+      const AdMob = _admob(); if (!AdMob) return;
+      try { await AdMob.initialize({ initializeForTesting: false }); } catch {}
+      try { const info = await AdMob.requestConsentInfo(); if (info && info.isConsentFormAvailable && info.status === "REQUIRED") await AdMob.showConsentForm(); } catch {}
+      prepInterstitial();
+      prepRewarded();
+    }
+    initAds();
     renderAd();
 
     // ===== Bottom nav wiring + preferences toggle =====
@@ -1178,6 +1245,7 @@
           updateChatMode();
           statusEl.textContent = "🔒 Setting up encryption…"; statusEl.style.color = "var(--muted)";
           show("chat"); beginSecure();
+          if (!m.friend) onMatchAd();
           break;
         case "pubkey": onPubKey(m.jwk); break;
         case "enc": handleEnc(m.p); break;
@@ -1337,7 +1405,7 @@
     let pc = null, localStream = null, callState = "idle", callTimer = null, callSecs = 0, callMuted = false, incomingOffer = null, callVideo = false;
 
     function sendRtc(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "rtc", data })); }
-    function showCall(name) { const n = name || (peer && peer.name) || "Friend"; callNameEl.textContent = n; callAvatarEl.textContent = n[0].toUpperCase(); callOverlay.classList.toggle("video", callVideo); callOverlay.hidden = false; }
+    function showCall(name) { if (typeof hideBannerAd === "function") hideBannerAd(); const n = name || (peer && peer.name) || "Friend"; callNameEl.textContent = n; callAvatarEl.textContent = n[0].toUpperCase(); callOverlay.classList.toggle("video", callVideo); callOverlay.hidden = false; }
     function setCallActions(state) {
       callActionsEl.innerHTML = "";
       const mk = (txt, cls, fn) => { const b = document.createElement("button"); b.className = "call-act " + cls; b.textContent = txt; b.onclick = fn; callActionsEl.appendChild(b); };
@@ -1386,7 +1454,7 @@
     async function onIce(c) { if (pc) { try { await pc.addIceCandidate(c); } catch {} } }
     function toggleMute() { callMuted = !callMuted; if (localStream) localStream.getAudioTracks().forEach((t) => t.enabled = !callMuted); setCallActions(callState); }
     function endCall() { sendRtc({ kind: "bye" }); cleanupCall(); }
-    function cleanupCall() { stopRing(); stopRingback(); callTimerStop(); if (pc) { try { pc.close(); } catch {} pc = null; } if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; } remoteVideo.srcObject = null; localVideo.srcObject = null; callState = "idle"; incomingOffer = null; callMuted = false; callVideo = false; callOverlay.classList.remove("video"); callOverlay.hidden = true; }
+    function cleanupCall() { stopRing(); stopRingback(); callTimerStop(); if (pc) { try { pc.close(); } catch {} pc = null; } if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; } remoteVideo.srcObject = null; localVideo.srcObject = null; callState = "idle"; incomingOffer = null; callMuted = false; callVideo = false; callOverlay.classList.remove("video"); callOverlay.hidden = true; if (typeof renderAd === "function") renderAd(); }
     function handleRtc(data) {
       if (!data) return;
       if (data.kind === "offer") onOffer(data.sdp, data.video);
@@ -1420,10 +1488,22 @@
       updateChatMode();
     }
     $("chName").onclick = () => openFriendMenu();
-    $("addFriendBtn").onclick = () => {
+    $("addFriendBtn").onclick = async () => {
       if (!matched) { addSys("Connect with someone first."); return; }
       if (peer.uid && isFriend(peer.uid)) { addSys("You're already friends 💚"); return; }
-      if (!canAddFriend()) { alert("You've reached today's 5 free friend limit. Go PRO for unlimited friends ⭐"); openPro(); return; }
+      if (!canAddFriend()) {
+        // Daily 5 free friend adds used up
+        if (rewardedAvailable()) {
+          const watch = confirm("You've used today's 5 free friend adds 👥\n\nWatch a short video to add this friend now — free!\n(Or upgrade to PRO for unlimited friends.)");
+          if (!watch) { openPro(); return; }
+          addSys("Loading video…");
+          const earned = await watchAdForReward();
+          if (!earned) { addSys("Video not finished — friend not added. Try again, or go PRO ⭐"); return; }
+          addSys("Thanks! Adding this friend 👍");
+        } else {
+          alert("You've reached today's 5 free friend limit. Go PRO for unlimited friends ⭐"); openPro(); return;
+        }
+      }
       ws.send(JSON.stringify({ type: "friendReq" }));
       addSys("Friend request sent 👋 waiting for them to accept…");
     };
