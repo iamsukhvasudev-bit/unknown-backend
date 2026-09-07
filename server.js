@@ -51,7 +51,9 @@ let waiting = [];
 const registry = new Map();
 
 // ---- Abuse protection ----
-const MAX_CONN_PER_IP = 8;         // max simultaneous connections from one IP
+// Mobile carriers use CGNAT — many real users share one public IP — so this cap must be
+// high enough not to block them, while still stopping an extreme single-IP flood.
+const MAX_CONN_PER_IP = 120;
 const ipConn = new Map();          // ip -> connection count
 const MSG_LIMIT = 25, MSG_WINDOW = 10000; // 25 heavy messages / 10s per socket
 const HEAVY = new Set(["chat", "enc", "photo", "voice", "gif", "rtc", "friendReq", "report", "connectFriend", "wipe"]);
@@ -62,8 +64,11 @@ function rateLimited(ws) {
   return ws._msgs.length > MSG_LIMIT;
 }
 function clientIp(req) {
-  try { return (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || (req.socket && req.socket.remoteAddress) || "?"; }
-  catch { return "?"; }
+  try {
+    // Render appends the real client IP as the LAST value; leftmost entries are client-spoofable.
+    const xff = (req.headers["x-forwarded-for"] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    return xff.length ? xff[xff.length - 1] : ((req.socket && req.socket.remoteAddress) || "?");
+  } catch { return "?"; }
 }
 const lastSeen = new Map();      // uid -> timestamp (updated on activity/disconnect)
 const showLastSeenPref = new Map(); // uid -> boolean (false = user hid last seen)
