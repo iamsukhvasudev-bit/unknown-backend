@@ -4,6 +4,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const { WebSocketServer } = require("ws");
 const db = require("./db");
 
@@ -403,3 +404,12 @@ wss.on("connection", (ws, req) => {
 server.listen(PORT, () => {
   console.log(`Unknown chat server running on http://localhost:${PORT}`);
 });
+
+// Keep-alive: on Render's free tier, ping our own public URL every ~13 min so the
+// instance never idles out (no cold-start delay for the first user).
+if (process.env.RENDER_EXTERNAL_URL) {
+  setInterval(() => {
+    https.get(process.env.RENDER_EXTERNAL_URL, (r) => r.resume()).on("error", () => {});
+  }, 13 * 60 * 1000);
+  console.log("Keep-alive enabled for", process.env.RENDER_EXTERNAL_URL);
+}
