@@ -338,7 +338,6 @@
   </header>
   <!-- hidden elements kept for logic; surfaced through the new UI -->
   <div hidden>
-    <span id="femaleCount">0</span><span id="maleCount">0</span>
     <button id="proBtn"><span id="proLabel">Go PRO</span></button>
     <button id="profileBtn"></button>
   </div>
@@ -737,18 +736,7 @@
     }
     if (_isNative()) { window.addEventListener("load", function () { setTimeout(function () { initBilling(); }, 2200); }); }
 
-    // ===== Fake fluctuating online counts (natural up/down random walk) =====
-    let female = 3995, male = 6048;
-    function drift(v, lo, hi) {
-      const step = Math.round((Math.random() * 2 - 1) * 45); // roughly -45..+45 each tick
-      v += step;
-      if (v < lo) v = lo + Math.floor(Math.random() * 40);   // bounce back up
-      if (v > hi) v = hi - Math.floor(Math.random() * 40);   // bounce back down
-      return v;
-    }
-    function renderCounts() { $("femaleCount").textContent = female.toLocaleString(); $("maleCount").textContent = male.toLocaleString(); }
-    renderCounts();
-    setInterval(() => { female = drift(female, 3600, 4400); male = drift(male, 5600, 6600); renderCounts(); }, 1500);
+    // (Removed placeholder online-count logic — no fabricated metrics are shown anywhere.)
 
     // ===== Name screen =====
     const nameInput = $("nameInput"), nameContinue = $("nameContinue");
@@ -948,11 +936,12 @@
       else if (which === "about") openSheet("About ℹ️", (b) => {
         const ua = navigator.userAgent; const am = ua.match(/Android\s+([\d.]+)/);
         const sys = am ? "Android " + am[1] : (/iPhone|iPad/.test(ua) ? "iOS" : "Web");
-        [["App version", "1.8"], ["Account ID", uid.slice(2, 18).toUpperCase()], ["System", sys]].forEach(([k, v]) => { const d = document.createElement("div"); d.className = "info-line"; const a = document.createElement("span"); a.textContent = k; const c = document.createElement("span"); c.textContent = v; d.appendChild(a); d.appendChild(c); b.appendChild(d); });
+        [["App version", "3.0"], ["Account ID", uid.slice(2, 18).toUpperCase()], ["System", sys]].forEach(([k, v]) => { const d = document.createElement("div"); d.className = "info-line"; const a = document.createElement("span"); a.textContent = k; const c = document.createElement("span"); c.textContent = v; d.appendChild(a); d.appendChild(c); b.appendChild(d); });
         const mk = (label, fn) => { const btn = document.createElement("button"); btn.className = "close"; btn.style.cssText = "margin:8px 0 0;text-align:left;"; btn.textContent = label; btn.onclick = fn; b.appendChild(btn); };
         mk("📋 Community rules", openRules);
         mk("🔒 Data & privacy", openDataPrivacy);
         mk("📄 Privacy Policy", () => { const url = (window.UNKNOWN_BACKEND ? window.UNKNOWN_BACKEND.replace(/^wss/, "https") : location.origin) + "/privacy.html"; try { window.open(url, "_blank"); } catch {} });
+        mk("🛡️ Child Safety Standards", () => { const url = (window.UNKNOWN_BACKEND ? window.UNKNOWN_BACKEND.replace(/^wss/, "https") : location.origin) + "/csae.html"; try { window.open(url, "_blank"); } catch {} });
         const box = document.createElement("div"); box.className = "about-box"; box.style.marginTop = "14px";
         box.innerHTML = '<div class="app">Un<b>known</b></div><div class="note">🔒 End-to-end encrypted · Talk freely, stay Unknown 🕶️<br>Contact: unknownapp.support@gmail.com</div>';
         b.appendChild(box);
@@ -1013,6 +1002,7 @@
 
     // ===== Google AdMob ads (native only; web has no ads) =====
     // NOTE: var (not const) so renderAd() can safely read these even if called during early init (no TDZ crash)
+    var AD_TEST_MODE = false;  // real ads for production. (Set true only for a private test APK to preview ads.)
     var AD_BANNER_ID = "ca-app-pub-8194327847458892/8652799994";
     var AD_INTERSTITIAL_ID = "ca-app-pub-8194327847458892/2253349500";
     var ADS_ENABLED = true;              // v1: ads for everyone (no paid tier yet)
@@ -1024,7 +1014,7 @@
     async function showBannerAd() {
       const AdMob = _admob(); if (!AdMob || !_adsInited || _bannerShown) return;
       _bannerShown = true;
-      try { await AdMob.showBanner({ adId: AD_BANNER_ID, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 56 }); }
+      try { await AdMob.showBanner({ adId: AD_BANNER_ID, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 56, isTesting: AD_TEST_MODE }); }
       catch { _bannerShown = false; }
     }
     async function hideBannerAd() {
@@ -1043,17 +1033,20 @@
     var _matchCount = 0, _interstitialReady = false;
     async function prepInterstitial() {
       const AdMob = _admob(); if (!AdMob) return;
-      try { await AdMob.prepareInterstitial({ adId: AD_INTERSTITIAL_ID }); _interstitialReady = true; }
+      try { await AdMob.prepareInterstitial({ adId: AD_INTERSTITIAL_ID, isTesting: AD_TEST_MODE }); _interstitialReady = true; }
       catch { _interstitialReady = false; }
     }
+    var _lastInterstitial = 0;
+    var AD_MIN_GAP_MS = 90000; // never show two full-screen ads within 90s
     async function onMatchAd() {
       if (!ADS_ENABLED || !_isNative() || !_adsInited || isPro()) return;
       const AdMob = _admob(); if (!AdMob) return;
       _matchCount++;
       if (_matchCount % AD_EVERY_N_MATCHES !== 0) return;
+      if (Date.now() - _lastInterstitial < AD_MIN_GAP_MS) return; // frequency cap
       try {
         if (!_interstitialReady) await prepInterstitial();
-        if (_interstitialReady) { await AdMob.showInterstitial(); _interstitialReady = false; prepInterstitial(); }
+        if (_interstitialReady) { _lastInterstitial = Date.now(); await AdMob.showInterstitial(); _interstitialReady = false; prepInterstitial(); }
       } catch { _interstitialReady = false; }
     }
     // Rewarded video — "watch a video to add an extra friend beyond the daily 5"
@@ -1061,7 +1054,7 @@
     var _rewardedReady = false;
     async function prepRewarded() {
       const AdMob = _admob(); if (!AdMob || !AD_REWARDED_ID) return;
-      try { await AdMob.prepareRewardVideoAd({ adId: AD_REWARDED_ID }); _rewardedReady = true; }
+      try { await AdMob.prepareRewardVideoAd({ adId: AD_REWARDED_ID, isTesting: AD_TEST_MODE }); _rewardedReady = true; }
       catch { _rewardedReady = false; }
     }
     function rewardedAvailable() { return _isNative() && _adsInited && !!_admob() && !!AD_REWARDED_ID; }
@@ -1293,7 +1286,6 @@
           updateChatMode();
           statusEl.textContent = "🔒 Setting up encryption…"; statusEl.style.color = "var(--muted)";
           show("chat"); beginSecure();
-          if (!m.friend) onMatchAd();
           break;
         case "pubkey": onPubKey(m.jwk); break;
         case "enc": handleEnc(m.p); break;
@@ -1348,6 +1340,7 @@
       finalizeChat();
       if (wantGender !== "any" && !isPro()) wantGender = "any";
       if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: "next", interests, myGender, wantGender, uid, name: userName, hidden: ghostOn, showLastSeen, orientation })); clearMsgs(); peer = { uid: null, name: null }; setMatched(false); }
+      onMatchAd(); // user-initiated "Next" — a natural break to show an ad
     }
 
     function sendMsg() {
